@@ -39,16 +39,17 @@ func ShortenUrl(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "Service error"})
 	}
 
-	err := decrDBLimit(c)
+	err := checkAPILimit(c)
 	if err != nil {
 		return err
 	}
 	body.URL = helpers.EnforceHTTP(body.URL)
+	decrAPILimit(c)
 	return nil
 }
 
-// decrDBLimit decreases Limit Counter for user API
-func decrDBLimit(c *fiber.Ctx) error {
+// checkAPILimit checks if user has entries left
+func checkAPILimit(c *fiber.Ctx) error {
 	r2 := database.CreateClient(1)
 	defer r2.Close()
 
@@ -65,6 +66,11 @@ func decrDBLimit(c *fiber.Ctx) error {
 			})
 		}
 	}
-	r2.Decr(database.Ctx, c.IP())
 	return nil
+}
+
+// decrAPILimit decreases Limit Counter for user API
+func decrAPILimit(c *fiber.Ctx) {
+	r2 := database.CreateClient(1)
+	r2.Decr(database.Ctx, c.IP())
 }
