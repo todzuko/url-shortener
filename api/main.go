@@ -11,8 +11,8 @@ import (
 )
 
 func setupRoutes(app *fiber.App) {
-	app.Get("/:url", routes.ShortenUrl)
-	app.Post("/api/v1", routes.ResolveUrl)
+	app.Get("/:url", routes.ResolveUrl)
+	app.Post("/api/v1", routes.ShortenUrl)
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusOK).JSON(fiber.Map{"message": "connected"})
 	})
@@ -28,5 +28,5 @@ func main() {
 
 	app.Use(logger.New())
 	setupRoutes(app)
-	log.Fatal(app.Listen(os.Getenv("APP_DOMAIN")))
+	log.Fatal(app.Listen(os.Getenv("APP_PORT")))
 }
