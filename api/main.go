@@ -23,12 +23,10 @@ func main() {
 	if err != nil {
 		fmt.Println(err)
 	}
+
 	app := fiber.New()
 
-	//app.Use(csrf.New())
 	app.Use(logger.New())
-
 	setupRoutes(app)
-
 	log.Fatal(app.Listen(os.Getenv("APP_PORT")))
 }
