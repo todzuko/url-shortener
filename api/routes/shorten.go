@@ -4,6 +4,7 @@ import (
 	"github.com/asaskevich/govalidator"
 	"github.com/go-redis/redis/v8"
 	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
 	"github.com/todzuko/url-shortener/database"
 	"github.com/todzuko/url-shortener/helpers"
 	"os"
@@ -27,25 +28,57 @@ type response struct {
 
 func ShortenUrl(c *fiber.Ctx) error {
 	body := new(request)
-	if err := c.BodyParser(&body); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
-	}
-
-	if !govalidator.IsURL(body.URL) {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid URL"})
-	}
-
-	if !helpers.RemoveDomainError(body.URL) {
-		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "Service error"})
-	}
-
-	err := checkAPILimit(c)
+	err := validateURL(c, *body)
 	if err != nil {
 		return err
 	}
+
+	err = checkAPILimit(c)
+	if err != nil {
+		return err
+	}
+
 	body.URL = helpers.EnforceHTTP(body.URL)
+
+	var id string
+	if body.Short == "" {
+		id = uuid.New().String()
+	} else {
+		id = body.Short
+	}
+	r := database.CreateClient(0)
+	defer r.Close()
+
+	val, _ := r.Get(database.Ctx, id).Result()
+	if val != "" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "Provided short url is already in use"})
+	}
+
+	if body.Exp == 0 {
+		body.Exp = 24
+	}
+	//set full url to sort
+	err = r.Set(database.Ctx, id, body.URL, body.Exp*3600*time.Second).Err()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "Unable to connect to server"})
+	}
+
+	res := response{
+		URL:             body.URL,
+		Short:           "",
+		Exp:             body.Exp,
+		XRateRemaining:  10,
+		XRateLimitReset: 30,
+	}
+
 	decrAPILimit(c)
-	return nil
+	r2 := database.CreateClient(1)
+	val, _ = r2.Get(database.Ctx, c.IP()).Result()
+	res.XRateRemaining, _ = strconv.Atoi(val)
+	ttl, _ := r2.TTL(database.Ctx, c.IP()).Result()
+	res.XRateLimitReset = ttl / time.Nanosecond / time.Minute
+	res.Short = os.Getenv("DOMAIN") + "/" + id
+	return c.Status(fiber.StatusOK).JSON(res)
 }
 
 // checkAPILimit checks if user has entries left
@@ -65,6 +98,19 @@ func checkAPILimit(c *fiber.Ctx) error {
 				"rate-limit-reset": limit / time.Nanosecond / time.Minute,
 			})
 		}
+	}
+	return nil
+}
+
+func validateURL(c *fiber.Ctx, body request) error {
+	if err := c.BodyParser(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Cannot parse JSON"})
+	}
+	if !govalidator.IsURL(body.URL) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "Invalid URL"})
+	}
+	if !helpers.RemoveDomainError(body.URL) {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "Service error"})
 	}
 	return nil
 }
